@@ -35,10 +35,18 @@
 
 /* Private define ------------------------------------------------------------*/
 /* USER CODE BEGIN PD */
-#define FREQ_MAX 16384		// 16.3kHz (potentiometer step of 4Hz)
+// Un-comment to bypass analog entries and use constant fixed values
+//#define FIXED_FREQ 200000 // Max 720_000
+//#define FIXED_DUTY 60
 
+// define min max frequency reachable by potentiometer
+#define FREQ_MIN 1
+#define FREQ_MAX 12000 // Max 720_000
+#define FREQ_BDW (FREQ_MAX - FREQ_MIN)
+
+// define min max analog values to avoid potentiometer noise and unreachable range
 #define POT_MIN 160
-#define POT_MAX 3940
+#define POT_MAX 3900 // Max 4096
 #define POT_INTER (POT_MAX - POT_MIN)
 
 #define LED_INTERVAL 250
@@ -62,10 +70,18 @@ uint16_t pot2 = 0;
 uint32_t freq = 1;
 uint16_t ducy = 50;
 
-uint16_t psc = 72;
 uint32_t ccr = 0;
 uint32_t arr = 0;
 uint32_t clk = 0;
+
+uint8_t ipsc = 25; // start with 72 divider
+uint16_t psc[67] = { 1,    2,    3,    4,    5,    6,    8,    9,    10,   12, // 72M timer clock dividers
+                     15,   16,   18,   20,   24,   25,   30,   32,   36,   40,
+                     45,   48,   50,   60,   64,   72,   75,   80,   90,   96,
+                     100,  120,  125,  128,  144,  150,  160,  180,  192,  200,
+                     225,  240,  250,  256,  288,  300,  320,  360,  375,  384,
+                     400,  450,  480,  500,  512,  576,  600,  625,  640,  720,
+                     750,  768,  800,  900,  960,  1000, 1125 }; // stop here because enough for minimum frequency 1Hz
 
 /* USER CODE END PV */
 
@@ -122,6 +138,8 @@ int main(void)
   HAL_TIM_PWM_Start(&htim1, TIM_CHANNEL_2);
   HAL_TIM_PWM_Start(&htim1, TIM_CHANNEL_3);
   HAL_TIM_PWM_Start(&htim1, TIM_CHANNEL_4);
+  HAL_TIMEx_PWMN_Start(&htim1, TIM_CHANNEL_1);
+  HAL_TIMEx_PWMN_Start(&htim1, TIM_CHANNEL_2);
   HAL_Delay(1);	// shift signals
   HAL_TIM_PWM_Start(&htim2, TIM_CHANNEL_3);
   HAL_TIM_PWM_Start(&htim2, TIM_CHANNEL_4);
@@ -135,35 +153,37 @@ int main(void)
   /* USER CODE BEGIN WHILE */
   while (1) {
 
+#if defined(FIXED_FREQ) && defined(FIXED_DUTY)
+	  freq = FIXED_FREQ;
+	  ducy = FIXED_DUTY;
+#else
 	  pot1 = adc_val[0];
 	  pot2 = adc_val[1];
 	  crop_values();
 
-	  freq = ((float)pot1 / POT_INTER) * FREQ_MAX; // (adc_val[0] / 4096.0) * FREQ_MAX;
-	  ducy = ((float)pot2 / POT_INTER) * 100;	// (adc_val[1] / 4096.0) * 100;
+	  freq = ((float)pot1 / POT_INTER) * FREQ_BDW + FREQ_MIN;
+	  ducy = ((float)pot2 / POT_INTER) * 100;
 	  if (freq == 0)
 		  freq = 1;
 	  if (ducy > 100)
 		  ducy = 100;
+#endif
 
-	  // Uncomment to set constant values
-//	  freq = 10000;
-//	  ducy = 30;
-
+	  // Search timer setup to fit expected frequency
 	  // TIM_CLK = APB_TIM_CLOCK / PRESCALAR
 	  // FREQ = TIM_CLOCK / ARR
 	  // DUTY (%) = (CCRx / ARR) * 100
 	  while (1) {
-		  clk = 72000000 / psc;
+		  clk = 72000000 / psc[ipsc];
 		  arr = clk / freq;
-		  if (arr < 100) {
-			  psc--;
+		  if (arr < 100) { // arr > 100 to be able to process any duty-cycle on it
+			  ipsc--;
 			  continue;
-		  } else if (arr > 65000) {
-			  psc++;
+		  } else if (arr > 65535) { // arr is 16 bit register
+			  ipsc++;
 			  continue;
 		  }
-		  ccr = ducy * arr / 100;
+		  ccr = (ducy * arr) / 100;
 		  break;
 	  }
 
@@ -172,21 +192,21 @@ int main(void)
 	  TIM1->CCR3 = ccr & 0xFFFF;
 	  TIM1->CCR4 = ccr & 0xFFFF;
 	  TIM1->ARR = (arr-1) & 0xFFFF;
-	  TIM1->PSC = psc-1;
+	  TIM1->PSC = psc[ipsc]-1;
 
 //	  TIM2->CCR1 = ccr & 0xFFFF;
 //	  TIM2->CCR2 = ccr & 0xFFFF;
 	  TIM2->CCR3 = ccr & 0xFFFF;
 	  TIM2->CCR4 = ccr & 0xFFFF;
 	  TIM2->ARR = (arr-1) & 0xFFFF;
-	  TIM2->PSC = psc-1;
+	  TIM2->PSC = psc[ipsc]-1;
 
 	  TIM3->CCR1 = ccr & 0xFFFF;
 	  TIM3->CCR2 = ccr & 0xFFFF;
 //	  TIM3->CCR3 = ccr & 0xFFFF;
 //	  TIM3->CCR4 = ccr & 0xFFFF;
 	  TIM3->ARR = (arr-1) & 0xFFFF;
-	  TIM3->PSC = psc-1;
+	  TIM3->PSC = psc[ipsc]-1;
 
     /* USER CODE END WHILE */
 
