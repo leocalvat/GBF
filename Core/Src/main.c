@@ -41,13 +41,13 @@
 
 // define min max frequency reachable by potentiometer
 #define FREQ_MIN 1
-#define FREQ_MAX 12000 // Max 720_000
-#define FREQ_BDW (FREQ_MAX - FREQ_MIN)
+#define FREQ_MAX 300 // Max 720_000
 
 // define min max analog values to avoid potentiometer noise and unreachable range
 #define POT_MIN 160
 #define POT_MAX 3900 // Max 4096
-#define POT_INTER (POT_MAX - POT_MIN)
+
+#define ADC_PW_MOY 10 // Min 1, Max 14, 8 means an average by 256
 
 #define LED_INTERVAL 250
 
@@ -55,6 +55,11 @@
 
 /* Private macro -------------------------------------------------------------*/
 /* USER CODE BEGIN PM */
+#define FREQ_BDW (FREQ_MAX - FREQ_MIN)
+#define POT_INTER (POT_MAX - POT_MIN)
+
+#define ADC_NB_MOY (1 << ADC_PW_MOY)
+#define ADC_BUF_SIZE (2 * ADC_NB_MOY)
 
 /* USER CODE END PM */
 
@@ -63,7 +68,7 @@
 /* USER CODE BEGIN PV */
 uint32_t led_last_time;
 
-uint16_t adc_val[2];
+uint16_t adc_val[ADC_BUF_SIZE];
 uint16_t pot1 = 0;
 uint16_t pot2 = 0;
 
@@ -89,6 +94,7 @@ uint16_t psc[67] = { 1,    2,    3,    4,    5,    6,    8,    9,    10,   12, /
 void SystemClock_Config(void);
 /* USER CODE BEGIN PFP */
 void DMA_ADC_init(void);
+void get_pot_average(void);
 void crop_values(void);
 /* USER CODE END PFP */
 
@@ -157,8 +163,7 @@ int main(void)
 	  freq = FIXED_FREQ;
 	  ducy = FIXED_DUTY;
 #else
-	  pot1 = adc_val[0];
-	  pot2 = adc_val[1];
+	  get_pot_average();
 	  crop_values();
 
 	  freq = ((float)pot1 / POT_INTER) * FREQ_BDW + FREQ_MIN;
@@ -289,7 +294,7 @@ void DMA_ADC_init(void) {
 	DMA1_Channel1->CMAR = (uint32_t)adc_val;
 
 	// Set Memory Buffer size
-	DMA1_Channel1->CNDTR = 2;
+	DMA1_Channel1->CNDTR = ADC_BUF_SIZE;
 
 	// Enable DMA1 Channel 1
 	DMA1_Channel1->CCR |= DMA_CCR_EN;
@@ -302,6 +307,17 @@ void DMA_ADC_init(void) {
 
 	// Start conversion
 	ADC1->CR2 |= ADC_CR2_SWSTART;
+}
+
+void get_pot_average(void) {
+	uint32_t pot1_c = 0;
+	uint32_t pot2_c = 0;
+	for (int i = 0; i < ADC_NB_MOY; i+=2) {
+		pot1_c += adc_val[i];
+		pot2_c += adc_val[i+1];
+	}
+	pot1 = (uint16_t)(pot1_c >> (ADC_PW_MOY-1));
+	pot2 = (uint16_t)(pot2_c >> (ADC_PW_MOY-1));
 }
 
 void crop_values(void) {
