@@ -19,6 +19,7 @@
 /* Includes ------------------------------------------------------------------*/
 #include "main.h"
 #include "adc.h"
+#include "dma.h"
 #include "tim.h"
 #include "gpio.h"
 
@@ -47,7 +48,8 @@
 #define POT_MIN 160
 #define POT_MAX 3900 // Max 4096
 
-#define ADC_PW_MOY 10 // Min 1, Max 14, 8 means an average by 256
+#define ADC_PW_MOY 10 // Min 1, Max 14 due to DMA NDT limit, 8 means an average by 256.
+// /!\ ADC_PW_MOY higher than 10 take to much place in RAM and trigger error at compilation
 
 #define LED_INTERVAL 250
 
@@ -131,6 +133,7 @@ int main(void)
 
   /* Initialize all configured peripherals */
   MX_GPIO_Init();
+  MX_DMA_Init();
   MX_ADC1_Init();
   MX_TIM1_Init();
   MX_TIM2_Init();
@@ -138,8 +141,9 @@ int main(void)
   /* USER CODE BEGIN 2 */
 
   HAL_ADCEx_Calibration_Start(&hadc1);
-  DMA_ADC_init();
-
+  // HAL would prefer a 32bit adc_val, but 16bits is enough as ADC is 12bit
+  // Also, 32bit would take more place in RAM, limiting average to 512
+  HAL_ADC_Start_DMA(&hadc1, adc_val, ADC_BUF_SIZE);
   HAL_TIM_PWM_Start(&htim1, TIM_CHANNEL_1);
   HAL_TIM_PWM_Start(&htim1, TIM_CHANNEL_2);
   HAL_TIM_PWM_Start(&htim1, TIM_CHANNEL_3);
@@ -250,6 +254,7 @@ void SystemClock_Config(void)
   {
     Error_Handler();
   }
+
   /** Initializes the CPU, AHB and APB buses clocks
   */
   RCC_ClkInitStruct.ClockType = RCC_CLOCKTYPE_HCLK|RCC_CLOCKTYPE_SYSCLK
@@ -272,42 +277,6 @@ void SystemClock_Config(void)
 }
 
 /* USER CODE BEGIN 4 */
-
-void DMA_ADC_init(void) {
-	// Start DMA clock
-	RCC->AHBENR |= RCC_AHBENR_DMA1EN;
-
-	// Reset DMA1 Channel 1 configuration
-	DMA1_Channel1->CCR = 0x00000000;
-
-	// Configure DMA1 Channel 1
-	// Peripheral -> Memory
-	// Peripheral is 16-bit, no increment
-	// Memory is 16-bit, increment
-	// Circular mode
-	DMA1_Channel1->CCR |= (0x01 <<DMA_CCR_PSIZE_Pos) | (0x01 <<DMA_CCR_MSIZE_Pos) | DMA_CCR_MINC | DMA_CCR_CIRC;
-
-	// Peripheral is ADC1 DR
-	DMA1_Channel1->CPAR = (uint32_t)&ADC1->DR;
-
-	// Memory is adc_val
-	DMA1_Channel1->CMAR = (uint32_t)adc_val;
-
-	// Set Memory Buffer size
-	DMA1_Channel1->CNDTR = ADC_BUF_SIZE;
-
-	// Enable DMA1 Channel 1
-	DMA1_Channel1->CCR |= DMA_CCR_EN;
-
-	// Enable ADC DMA Request
-	ADC1->CR2 |= ADC_CR2_DMA;
-
-	// Enable ADC
-	ADC1->CR2 |= ADC_CR2_ADON;
-
-	// Start conversion
-	ADC1->CR2 |= ADC_CR2_SWSTART;
-}
 
 void get_pot_average(void) {
 	uint32_t pot1_c = 0;
@@ -366,4 +335,3 @@ void assert_failed(uint8_t *file, uint32_t line)
   /* USER CODE END 6 */
 }
 #endif /* USE_FULL_ASSERT */
-
